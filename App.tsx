@@ -98,25 +98,20 @@ export default function App() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Load initial data with strict validation
+  // Load initial data
   useEffect(() => {
     try {
       const saved = localStorage.getItem('kinship_connections_v5');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-           // Basic migration to V5 fields with safeguards
+           // Basic migration to V5 fields
            const migrated = parsed.map(c => ({
              ...c,
              plannedContactType: c.plannedContactType || ContactType.CALL,
              // Map old email/phone if they exist and new ones don't
              emailWork: c.emailWork || c.email || '',
-             phoneWork: c.phoneWork || c.phone || '',
-             // CRITICAL: Ensure interactions is always an array
-             interactions: Array.isArray(c.interactions) ? c.interactions : [],
-             // Ensure dates are valid strings or null
-             lastContactDate: c.lastContactDate || null,
-             plannedContactDate: c.plannedContactDate || null,
+             phoneWork: c.phoneWork || c.phone || ''
            }));
            setConnections(migrated);
         } else {
@@ -128,7 +123,6 @@ export default function App() {
       }
     } catch (e) {
       console.error("Failed to load connections from localStorage", e);
-      // Auto-recover by resetting to default if data is corrupted
       setConnections(INITIAL_DATA);
       localStorage.removeItem('kinship_connections_v5');
     }
@@ -142,7 +136,30 @@ export default function App() {
   }, [connections]);
 
   const handleAddConnection = () => {
-      // Select 'new' to trigger empty modal
+      // Create a temporary "new" connection object
+      const newConnection: Connection = {
+          id: 'new',
+          name: '',
+          company: '',
+          role: '',
+          address: '',
+          emailWork: '',
+          contextInput: '',
+          contextSummary: '',
+          overviewSummary: '',
+          interactions: [],
+          lastContactDate: null,
+          lastContactType: null,
+          plannedContactDate: null,
+          plannedContactType: ContactType.CALL
+      };
+      // We don't add it to the list yet, just open the modal with it
+      // Since our modal relies on finding the ID in the list, we need a separate state or 
+      // temporarily add it to list?
+      // Better: pass the object directly to modal if we change how modal works, 
+      // BUT current implementation finds by ID.
+      // Let's modify the selection logic slightly:
+      // If selectedConnectionId is 'new', we pass the blank object.
       setSelectedConnectionId('new');
   };
 
@@ -159,4 +176,154 @@ export default function App() {
   };
 
   const filteredConnections = connections
-    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.company
+    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.company.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'lastContacted') {
+        const dateA = a.lastContactDate ? new Date(a.lastContactDate).getTime() : 0;
+        const dateB = b.lastContactDate ? new Date(b.lastContactDate).getTime() : 0;
+        return (isNaN(dateB) ? 0 : dateB) - (isNaN(dateA) ? 0 : dateA);
+      }
+      if (sortBy === 'upcoming') {
+        const dateA = a.plannedContactDate ? new Date(a.plannedContactDate).getTime() : 9999999999999;
+        const dateB = b.plannedContactDate ? new Date(b.plannedContactDate).getTime() : 9999999999999;
+        return (isNaN(dateA) ? 9999999999999 : dateA) - (isNaN(dateB) ? 9999999999999 : dateB);
+      }
+      return 0;
+    });
+
+  // Helper to determine what to pass to modal
+  const getSelectedConnection = () => {
+      if (selectedConnectionId === 'new') {
+           return {
+              id: 'new',
+              name: '',
+              company: '',
+              role: '',
+              address: '',
+              emailWork: '',
+              contextInput: '',
+              contextSummary: '',
+              overviewSummary: '',
+              interactions: [],
+              lastContactDate: null,
+              lastContactType: null,
+              plannedContactDate: null,
+              plannedContactType: ContactType.CALL
+          } as Connection;
+      }
+      return connections.find(c => c.id === selectedConnectionId);
+  }
+
+  const selectedConnection = getSelectedConnection();
+
+  return (
+    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans pb-20">
+      
+      {/* Top Navigation */}
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-stone-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-amber-700 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">K</div>
+            <h1 className="text-xl font-bold tracking-tight text-stone-900">Kinship</h1>
+          </div>
+          
+          <div className="flex items-center gap-3">
+             <Button variant="primary" size="sm" icon={<Plus className="w-4 h-4"/>} onClick={handleAddConnection}>Add Connection</Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* Controls Bar */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+            <input 
+              type="text" 
+              placeholder="Search connections..." 
+              className="w-full pl-10 pr-4 py-2 rounded-xl border border-stone-200 bg-white text-sm focus:ring-2 focus:ring-stone-400/20 focus:border-stone-400 outline-none transition-all"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-center gap-3 self-end md:self-auto">
+             <div className="flex items-center gap-2 bg-white rounded-lg border border-stone-200 p-1">
+                <button 
+                  onClick={() => setViewMode('grid')}
+                  className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-stone-100 text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => setViewMode('list')}
+                  className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-stone-100 text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
+                >
+                  <List className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => setViewMode('calendar')}
+                  className={`p-1.5 rounded-md transition-colors ${viewMode === 'calendar' ? 'bg-stone-100 text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}
+                >
+                  <Calendar className="w-4 h-4" />
+                </button>
+             </div>
+
+             <div className="relative">
+               <select 
+                 className="appearance-none bg-white pl-9 pr-8 py-2 rounded-xl border border-stone-200 text-sm font-medium text-stone-600 focus:outline-none focus:border-stone-400 cursor-pointer"
+                 value={sortBy}
+                 onChange={(e) => setSortBy(e.target.value as SortOption)}
+               >
+                 <option value="lastContacted">Recently Contacted</option>
+                 <option value="name">Name (A-Z)</option>
+                 <option value="upcoming">Upcoming Plans</option>
+               </select>
+               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 pointer-events-none" />
+             </div>
+          </div>
+        </div>
+
+        {/* Content View */}
+        {filteredConnections.length === 0 ? (
+          <div className="text-center py-20">
+            <p className="text-stone-500">No connections found matching your search.</p>
+          </div>
+        ) : (
+          <>
+            {viewMode === 'grid' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredConnections.map(c => (
+                  <ConnectionCard key={c.id} connection={c} onClick={() => setSelectedConnectionId(c.id)} />
+                ))}
+              </div>
+            )}
+            {viewMode === 'list' && (
+              <div className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden">
+                {filteredConnections.map(c => (
+                  <ConnectionListRow key={c.id} connection={c} onClick={() => setSelectedConnectionId(c.id)} />
+                ))}
+              </div>
+            )}
+            {viewMode === 'calendar' && (
+              <CalendarView connections={filteredConnections} onSelectConnection={setSelectedConnectionId} />
+            )}
+          </>
+        )}
+      </main>
+
+      {/* Detail Modal */}
+      {selectedConnection && (
+        <ConnectionDetailModal 
+          connection={selectedConnection} 
+          onClose={() => setSelectedConnectionId(null)}
+          onUpdate={handleSaveConnection}
+          isNew={selectedConnectionId === 'new'}
+        />
+      )}
+    </div>
+  );
+}
